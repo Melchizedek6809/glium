@@ -1,3 +1,4 @@
+/*
 #![allow(dead_code)]
 use std::time::{Duration, Instant};
 use glium::{self, Display};
@@ -96,3 +97,4 @@ pub fn load_wavefront(display: &Display, data: &[u8]) -> VertexBufferAny {
 
     glium::vertex::VertexBuffer::new(display, &vertex_data).unwrap().into()
 }
+ */

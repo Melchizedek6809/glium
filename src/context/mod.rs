@@ -242,6 +242,12 @@ impl Context {
         self.backend.borrow().get_framebuffer_dimensions()
     }
 
+    /// Calls `get_framebuffer_dimensions` on the backend object stored by this context.
+    #[inline]
+    pub fn set_framebuffer_dimensions(&self, new_dimensions: (u32, u32)) {
+        self.backend.borrow_mut().set_framebuffer_dimensions(new_dimensions);
+    }
+
     /// Changes the OpenGL context associated with this context.
     ///
     /// The new context **must** have lists shared with the old one.
@@ -277,8 +283,8 @@ impl Context {
         Ok(())
     }
 
-    /// Swaps the buffers in the backend.
-    pub fn swap_buffers(&self) -> Result<(), SwapBuffersError> {
+    /// Do everything that needs to happen before we can swap buffers
+    pub fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError> {
         if self.state.borrow().lost_context {
             return Err(SwapBuffersError::ContextLost);
         }
@@ -314,12 +320,7 @@ impl Context {
             unsafe { backend.make_current() };
         }
 
-        // swapping
-        let err = backend.swap_buffers();
-        if let Err(SwapBuffersError::ContextLost) = err {
-            self.state.borrow_mut().lost_context = true;
-        }
-        err
+        Ok(())
     }
 
     /// Returns the OpenGL version

@@ -9,6 +9,7 @@ Only available if the 'glutin' feature is enabled.
 
 */
 pub use glutin;
+use takeable_option::Takeable;
 
 pub mod headless;
 
@@ -17,15 +18,76 @@ use crate::backend::Backend;
 use crate::backend::Context;
 use crate::context;
 use crate::debug;
-use crate::glutin::{ContextCurrentState, PossiblyCurrent as Pc};
+use crate::glutin::prelude::*;
+use crate::glutin::context::{PossiblyCurrentContext, NotCurrentContext};
+use crate::glutin::display::GetGlDisplay;
+use crate::glutin::surface::{Surface, WindowSurface };
 use std::cell::{Cell, Ref, RefCell};
 use std::error::Error;
+use std::ffi::CString;
 use std::fmt;
 use std::ops::Deref;
 use std::os::raw::c_void;
 use std::rc::Rc;
-use takeable_option::Takeable;
-use crate::{Frame, IncompatibleOpenGl, SwapBuffersError};
+use crate::{Frame, IncompatibleOpenGl};
+
+/// Contains a GL contenxt, that may or may not be current
+pub enum WindowedContext {
+    /// Contains a GL contenxt, that may be current
+    PossiblyCurrent {
+        /// The context
+        context: PossiblyCurrentContext,
+        /// Needs to be updated by the client code that is managing the surface.
+        framebuffer_dimensions: Cell<(u32, u32)>,
+    },
+    /// Contains a GL contenxt, that is not current
+    NotCurrent {
+        /// The context
+        context: NotCurrentContext,
+    }
+}
+
+impl From<NotCurrentContext> for WindowedContext {
+    fn from(context: NotCurrentContext) -> Self {
+        Self::NotCurrent { context }
+    }
+}
+
+impl From<PossiblyCurrentContext> for WindowedContext {
+    fn from(context: PossiblyCurrentContext) -> Self {
+        let framebuffer_dimensions = Cell::new((800, 600));
+        Self::PossiblyCurrent { context, framebuffer_dimensions }
+    }
+}
+
+impl WindowedContext {
+
+    /// Return the display associated with the context
+    pub fn display(&self) -> glutin::display::Display {
+        match self {
+            WindowedContext::NotCurrent { context } => context.display(),
+            WindowedContext::PossiblyCurrent { context, .. } => context.display(),
+        }
+    }
+
+    /// Return whether the context is current or not
+    pub fn is_current(&self) -> bool {
+        match self {
+            WindowedContext::NotCurrent { context } => false,
+            WindowedContext::PossiblyCurrent { context, .. } => context.is_current(),
+        }
+    }
+
+    /// Update the framebuffer dimensions
+    pub fn set_framebuffer_dimensions(&self, new_dimensions:(u32, u32)) {
+        match self {
+            WindowedContext::PossiblyCurrent { framebuffer_dimensions, .. } => {
+                framebuffer_dimensions.replace(new_dimensions);
+            },
+            _ => (),
+        }
+    }
+}
 
 /// A GL context combined with a facade for drawing upon.
 ///
@@ -37,7 +99,7 @@ pub struct Display {
     // contains everything related to the current context and its state
     context: Rc<context::Context>,
     // The glutin Window alongside its associated GL Context.
-    gl_window: Rc<RefCell<Takeable<glutin::WindowedContext<Pc>>>>,
+    gl_window: Rc<RefCell<Takeable<WindowedContext>>>,
     // Used to check whether the framebuffer dimensions have changed between frames. If they have,
     // the glutin context must be resized accordingly.
     last_framebuffer_dimensions: Cell<(u32, u32)>,
@@ -45,13 +107,13 @@ pub struct Display {
 
 /// An implementation of the `Backend` trait for glutin.
 #[derive(Clone)]
-pub struct GlutinBackend(Rc<RefCell<Takeable<glutin::WindowedContext<Pc>>>>);
+pub struct GlutinBackend(Rc<RefCell<Takeable<WindowedContext>>>);
 
 /// Error that can happen while creating a glium display.
 #[derive(Debug)]
 pub enum DisplayCreationError {
     /// An error has happened while creating the backend.
-    GlutinCreationError(glutin::CreationError),
+    GlutinError(glutin::error::Error),
     /// The OpenGL implementation is too old.
     IncompatibleOpenGl(IncompatibleOpenGl),
 }
@@ -67,102 +129,76 @@ impl Display {
     ///
     /// Performs a compatibility check to make sure that all core elements of glium are supported
     /// by the implementation.
-    pub fn new<T: ContextCurrentState, E>(
-        wb: winit::window::WindowBuilder,
-        cb: glutin::ContextBuilder<'_, T>,
-        events_loop: &winit::event_loop::EventLoopWindowTarget<E>,
+    pub fn new(
+        context: PossiblyCurrentContext
     ) -> Result<Self, DisplayCreationError> {
-        let gl_window = cb.build_windowed(wb, events_loop)?;
-        Self::from_gl_window(gl_window).map_err(From::from)
+        Self::from_current_context(context).map_err(From::from)
     }
 
     /// Create a new glium `Display`.
     ///
     /// Performs a compatibility check to make sure that all core elements of glium are supported
     /// by the implementation.
-    pub fn from_gl_window<T: ContextCurrentState>(
-        gl_window: glutin::WindowedContext<T>,
+    pub fn from_current_context(
+        context: PossiblyCurrentContext
     ) -> Result<Self, IncompatibleOpenGl> {
-        Self::with_debug(gl_window, Default::default())
+        Self::with_debug(context, Default::default())
     }
 
     /// Create a new glium `Display`.
     ///
     /// This function does the same as `build_glium`, except that the resulting context
     /// will assume that the current OpenGL context will never change.
-    pub unsafe fn unchecked<T: ContextCurrentState>(
-        gl_window: glutin::WindowedContext<T>,
+    pub unsafe fn unchecked(
+        context: PossiblyCurrentContext
     ) -> Result<Self, IncompatibleOpenGl> {
-        Self::unchecked_with_debug(gl_window, Default::default())
+        Self::unchecked_with_debug(context, Default::default())
     }
 
     /// The same as the `new` constructor, but allows for specifying debug callback behaviour.
-    pub fn with_debug<T: ContextCurrentState>(
-        gl_window: glutin::WindowedContext<T>,
+    pub fn with_debug(
+        context: PossiblyCurrentContext,
         debug: debug::DebugCallbackBehavior,
     ) -> Result<Self, IncompatibleOpenGl> {
-        Self::new_inner(gl_window, debug, true)
+        Self::new_inner(context, debug, true)
     }
 
     /// The same as the `unchecked` constructor, but allows for specifying debug callback behaviour.
-    pub unsafe fn unchecked_with_debug<T: ContextCurrentState>(
-        gl_window: glutin::WindowedContext<T>,
+    pub unsafe fn unchecked_with_debug(
+        context: PossiblyCurrentContext,
         debug: debug::DebugCallbackBehavior,
     ) -> Result<Self, IncompatibleOpenGl> {
-        Self::new_inner(gl_window, debug, false)
+        Self::new_inner(context, debug, false)
     }
 
-    fn new_inner<T: ContextCurrentState>(
-        gl_window: glutin::WindowedContext<T>,
+    fn new_inner(
+        context: PossiblyCurrentContext,
         debug: debug::DebugCallbackBehavior,
         checked: bool,
     ) -> Result<Self, IncompatibleOpenGl> {
-        let gl_window = unsafe { gl_window.treat_as_current() };
-        let gl_window = Rc::new(RefCell::new(Takeable::new(gl_window)));
+        let gl_window = Rc::new(RefCell::new(Takeable::new(context.into())));
         let glutin_backend = GlutinBackend(gl_window.clone());
-        let framebuffer_dimensions = glutin_backend.get_framebuffer_dimensions();
+        let framebuffer_dimensions = (800, 600);
         let context = unsafe { context::Context::new(glutin_backend, checked, debug) }?;
         Ok(Display {
             gl_window,
             context,
-            last_framebuffer_dimensions: Cell::new(framebuffer_dimensions),
+            last_framebuffer_dimensions: Cell::new((0,0)),
         })
     }
 
-    /// Rebuilds the Display's `WindowedContext` with the given window and context builders.
-    ///
-    /// This method ensures that the new `WindowedContext`'s `Context` will share the display lists of the
-    /// original `WindowedContext`'s `Context`.
-    pub fn rebuild<T: ContextCurrentState>(
-        &self,
-        wb: winit::window::WindowBuilder,
-        cb: glutin::ContextBuilder<'_, T>,
-        events_loop: &winit::event_loop::EventLoop<()>,
-    ) -> Result<(), DisplayCreationError> {
-        // Share the display lists of the existing context.
-        let new_gl_window = {
-            let gl_window = self.gl_window.borrow();
-            let cb = cb.with_shared_lists(gl_window.context());
-            cb.build_windowed(wb, events_loop)?
-        };
-        let new_gl_window = unsafe { new_gl_window.treat_as_current() };
-
-        // Replace the stored WindowedContext with the new one.
-        {
-            let mut gl_window = self.gl_window.borrow_mut();
-            Takeable::insert(&mut gl_window, new_gl_window);
+    fn set_framebuffer_dimensions(
+        &mut self,
+        new_dimensions: (u32, u32)
+    ) {
+        if let WindowedContext::PossiblyCurrent { framebuffer_dimensions, .. } = self.gl_window.borrow().deref().deref() {
+            framebuffer_dimensions.replace(new_dimensions);
         }
-
-        // Rebuild the Context.
-        let backend = GlutinBackend(self.gl_window.clone());
-        unsafe { self.context.rebuild(backend) }?;
-
-        Ok(())
     }
 
     /// Borrow the inner glutin WindowedContext.
     #[inline]
-    pub fn gl_window(&self) -> Ref<'_, impl Deref<Target = glutin::WindowedContext<Pc>>> {
+    pub fn gl_window(&self) -> Ref<Takeable<WindowedContext>> {
         self.gl_window.borrow()
     }
 
@@ -177,12 +213,12 @@ impl Display {
     /// context will be resized accordingly before returning the `Frame`.
     #[inline]
     pub fn draw(&self) -> Frame {
-        let (w, h) = self.get_framebuffer_dimensions();
+        let (w, h) = self.context.get_framebuffer_dimensions();
 
         // If the size of the framebuffer has changed, resize the context.
         if self.last_framebuffer_dimensions.get() != (w, h) {
             self.last_framebuffer_dimensions.set((w, h));
-            self.gl_window.borrow().resize((w, h).into());
+            //self.gl_window.borrow().resize(self.framebuffer_dimensions.get().into());
         }
 
         Frame::new(self.context.clone(), (w, h))
@@ -192,7 +228,7 @@ impl Display {
 impl fmt::Display for DisplayCreationError {
     fn fmt(&self, fmt: &mut fmt::Formatter<'_>) -> Result<(), fmt::Error> {
         match self {
-            DisplayCreationError::GlutinCreationError(err) => write!(fmt, "{}", err),
+            DisplayCreationError::GlutinError(err) => write!(fmt, "{}", err),
             DisplayCreationError::IncompatibleOpenGl(err) => write!(fmt, "{}", err),
         }
     }
@@ -202,16 +238,16 @@ impl Error for DisplayCreationError {
     #[inline]
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match *self {
-            DisplayCreationError::GlutinCreationError(ref err) => Some(err),
+            DisplayCreationError::GlutinError(ref err) => Some(err),
             DisplayCreationError::IncompatibleOpenGl(ref err) => Some(err),
         }
     }
 }
 
-impl From<glutin::CreationError> for DisplayCreationError {
+impl From<glutin::error::Error> for DisplayCreationError {
     #[inline]
-    fn from(err: glutin::CreationError) -> DisplayCreationError {
-        DisplayCreationError::GlutinCreationError(err)
+    fn from(err: glutin::error::Error) -> DisplayCreationError {
+        DisplayCreationError::GlutinError(err)
     }
 }
 
@@ -238,7 +274,7 @@ impl backend::Facade for Display {
 }
 
 impl Deref for GlutinBackend {
-    type Target = Rc<RefCell<Takeable<glutin::WindowedContext<Pc>>>>;
+    type Target = Rc<RefCell<Takeable<WindowedContext>>>;
     #[inline]
     fn deref(&self) -> &Self::Target {
         &self.0
@@ -247,49 +283,67 @@ impl Deref for GlutinBackend {
 
 unsafe impl Backend for GlutinBackend {
     #[inline]
-    fn swap_buffers(&self) -> Result<(), SwapBuffersError> {
-        match self.borrow().swap_buffers() {
-            Ok(()) => Ok(()),
-            Err(glutin::ContextError::IoError(e)) => {
-                panic!("I/O Error while swapping buffers: {:?}", e)
-            }
-            Err(glutin::ContextError::OsError(e)) => {
-                panic!("OS Error while swapping buffers: {:?}", e)
-            }
-            // As of writing the FunctionUnavailable error is only thrown if
-            // you are swapping buffers with damage rectangles specified.
-            // Currently we don't support this so we just panic as this
-            // case should be unreachable.
-            Err(glutin::ContextError::FunctionUnavailable) => {
-                panic!("function unavailable error while swapping buffers")
-            }
-            Err(glutin::ContextError::ContextLost) => Err(SwapBuffersError::ContextLost),
-        }
+    fn prepare_to_swap_buffers(&self) -> Result<(), crate::SwapBuffersError> {
+        Ok(())
     }
 
     #[inline]
     unsafe fn get_proc_address(&self, symbol: &str) -> *const c_void {
-        self.borrow().get_proc_address(symbol) as *const _
+        let symbol = CString::new(symbol).unwrap();
+        let ret = self.borrow().display().get_proc_address(&symbol) as *const _;
+        ret
     }
 
     #[inline]
     fn get_framebuffer_dimensions(&self) -> (u32, u32) {
-        let gl_window_takeable = self.borrow();
-        let gl_window = gl_window_takeable.window();
-        let (width, height) = gl_window.inner_size().into();
-        (width, height)
+        if let WindowedContext::PossiblyCurrent { framebuffer_dimensions, .. } = self.0.borrow().deref().deref() {
+            framebuffer_dimensions.get()
+        } else {
+            todo!();
+        }
+    }
+
+    #[inline]
+    fn set_framebuffer_dimensions(&self, new_dimensions: (u32, u32)) {
+        if let WindowedContext::PossiblyCurrent { framebuffer_dimensions, .. } = self.0.borrow().deref().deref() {
+            framebuffer_dimensions.replace(new_dimensions);
+        }
     }
 
     #[inline]
     fn is_current(&self) -> bool {
-        self.borrow().is_current()
+        match self.borrow().deref().deref() {
+            WindowedContext::NotCurrent { .. } => false,
+            WindowedContext::PossiblyCurrent { context, ..} => {
+                context.is_current()
+            }
+        }
     }
 
     #[inline]
     unsafe fn make_current(&self) {
+        /*
         let mut gl_window_takeable = self.borrow_mut();
         let gl_window = Takeable::take(&mut gl_window_takeable);
         let new_gl_window = gl_window.make_current().unwrap();
         Takeable::insert(&mut gl_window_takeable, new_gl_window);
+         */
+    }
+}
+
+impl GlutinBackend {
+    #[inline]
+    unsafe fn make_current_with_surface(&self, surface: &Surface<WindowSurface>) {
+        let mut ctx = self.borrow_mut();
+        let context = Takeable::take(&mut ctx);
+        match context {
+            WindowedContext::NotCurrent { context } => {
+                Takeable::insert(&mut ctx, context.make_current(surface).unwrap().into());
+            },
+            WindowedContext::PossiblyCurrent { context, .. } => {
+                let context = context.make_not_current().unwrap();
+                Takeable::insert(&mut ctx, context.make_current(surface).unwrap().into());
+            }
+        }
     }
 }

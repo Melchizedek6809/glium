@@ -20,7 +20,7 @@ pub fn build_display() -> glium::Display {
     let cb = glutin::ContextBuilder::new()
         .with_gl_debug_flag(true)
         .with_gl(version);
-    glium::Display::new(wb, cb, &event_loop).unwrap()
+    glium::Display::new(cb).unwrap()
 }
 
 /// Builds a headless display for tests.
@@ -46,7 +46,9 @@ pub fn rebuild_display(display: &glium::Display) {
     let cb = glutin::ContextBuilder::new()
         .with_gl_debug_flag(true)
         .with_gl(version);
-    display.rebuild(wb, cb, &event_loop).unwrap();
+    unsafe {
+        display.rebuild(cb).unwrap();
+    }
 }
 
 fn parse_version() -> glutin::GlRequest {

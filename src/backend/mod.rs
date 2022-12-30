@@ -35,7 +35,7 @@ pub mod glutin;
 /// the methods correctly.
 pub unsafe trait Backend {
     /// Swaps buffers at the end of a frame.
-    fn swap_buffers(&self) -> Result<(), SwapBuffersError>;
+    fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError>;
 
     /// Returns the address of an OpenGL function.
     ///
@@ -45,6 +45,9 @@ pub unsafe trait Backend {
     /// Returns the dimensions of the window, or screen, etc.
     fn get_framebuffer_dimensions(&self) -> (u32, u32);
 
+    /// Returns the dimensions of the window, or screen, etc.
+    fn set_framebuffer_dimensions(&self, new_dimensions: (u32, u32));
+
     /// Returns true if the OpenGL context is the current one in the thread.
     fn is_current(&self) -> bool;
 
@@ -53,8 +56,8 @@ pub unsafe trait Backend {
 }
 
 unsafe impl<T> Backend for Rc<T> where T: Backend {
-    fn swap_buffers(&self) -> Result<(), SwapBuffersError> {
-        self.deref().swap_buffers()
+    fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError> {
+        self.deref().prepare_to_swap_buffers()
     }
 
     unsafe fn get_proc_address(&self, symbol: &str) -> *const c_void {
@@ -63,6 +66,10 @@ unsafe impl<T> Backend for Rc<T> where T: Backend {
 
     fn get_framebuffer_dimensions(&self) -> (u32, u32) {
         self.deref().get_framebuffer_dimensions()
+    }
+
+    fn set_framebuffer_dimensions(&self, new_dimensions: (u32, u32)) {
+        self.deref().set_framebuffer_dimensions(new_dimensions);
     }
 
     fn is_current(&self) -> bool {

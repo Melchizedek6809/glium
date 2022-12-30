@@ -41,6 +41,7 @@ impl PartialOrd for Version {
 /// an undefined behavior.
 pub unsafe fn get_gl_version(gl: &gl::Gl) -> Version {
     let version = gl.GetString(gl::VERSION);
+    if version.is_null() { panic!("Can't determine GL Version"); }
     let version = String::from_utf8(CStr::from_ptr(version as *const _).to_bytes().to_vec()).unwrap();
 
     // for the moment we mock WebGL as OpenGL ES 2.0

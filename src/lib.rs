@@ -1278,7 +1278,7 @@ impl Frame {
         }
 
         self.destroyed = true;
-        self.context.swap_buffers()
+        self.context.prepare_to_swap_buffers()
     }
 }
 
