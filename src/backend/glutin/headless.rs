@@ -1,6 +1,6 @@
 //! Backend implementation for a glutin headless renderer.
 
-use crate::{Frame, IncompatibleOpenGl, SwapBuffersError};
+use crate::{Frame, IncompatibleOpenGl};
 use crate::debug;
 use crate::context;
 use crate::backend::{self, Backend};
@@ -40,11 +40,6 @@ impl Deref for GlutinBackend {
 
 unsafe impl Backend for GlutinBackend {
     #[inline]
-    fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError> {
-        Ok(())
-    }
-
-    #[inline]
     unsafe fn get_proc_address(&self, symbol: &str) -> *const c_void {
         let symbol = CString::new(symbol).unwrap();
         let ret = self.0.borrow().display().get_proc_address(&symbol) as *const _;
@@ -65,15 +60,6 @@ unsafe impl Backend for GlutinBackend {
     #[inline]
     fn is_current(&self) -> bool {
         self.0.borrow().is_current()
-    }
-
-    #[inline]
-    unsafe fn make_current(&self) {
-        let mut gl_window_takeable = self.0.borrow_mut();
-        let gl_window = Takeable::take(&mut gl_window_takeable);
-        //let gl_window_new = gl_window.make_current().unwrap();
-        Takeable::insert(&mut gl_window_takeable, gl_window);
-        todo!();
     }
 }
 

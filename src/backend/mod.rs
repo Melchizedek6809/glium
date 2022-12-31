@@ -17,7 +17,6 @@ use std::ops::Deref;
 use std::os::raw::c_void;
 
 use crate::CapabilitiesSource;
-use crate::SwapBuffersError;
 
 use crate::context::Capabilities;
 use crate::context::ExtensionsList;
@@ -34,9 +33,6 @@ pub mod glutin;
 /// This trait is unsafe, as you can get undefined behaviors or crashes if you don't implement
 /// the methods correctly.
 pub unsafe trait Backend {
-    /// Swaps buffers at the end of a frame.
-    fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError>;
-
     /// Returns the address of an OpenGL function.
     ///
     /// Supposes that the context has been made current before this function is called.
@@ -50,16 +46,9 @@ pub unsafe trait Backend {
 
     /// Returns true if the OpenGL context is the current one in the thread.
     fn is_current(&self) -> bool;
-
-    /// Makes the OpenGL context the current context in the current thread.
-    unsafe fn make_current(&self);
 }
 
 unsafe impl<T> Backend for Rc<T> where T: Backend {
-    fn prepare_to_swap_buffers(&self) -> Result<(), SwapBuffersError> {
-        self.deref().prepare_to_swap_buffers()
-    }
-
     unsafe fn get_proc_address(&self, symbol: &str) -> *const c_void {
         self.deref().get_proc_address(symbol)
     }
@@ -74,10 +63,6 @@ unsafe impl<T> Backend for Rc<T> where T: Backend {
 
     fn is_current(&self) -> bool {
         self.deref().is_current()
-    }
-
-    unsafe fn make_current(&self) {
-        self.deref().make_current();
     }
 }
 

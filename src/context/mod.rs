@@ -162,7 +162,7 @@ impl Context {
     ) -> Result<Rc<Context>, IncompatibleOpenGl>
         where B: Backend + 'static
     {
-        backend.make_current();
+        //backend.make_current();
 
         let gl = gl::Gl::load_with(|symbol| backend.get_proc_address(symbol) as *const _);
         let gl_state: RefCell<GlState> = RefCell::new(Default::default());
@@ -262,7 +262,7 @@ impl Context {
             vertex_array_object::VertexAttributesSystem::purge_all(&mut ctxt);
         }
 
-        new_backend.make_current();
+        //new_backend.make_current();
 
         *self.state.borrow_mut() = Default::default();
         // FIXME: verify version, capabilities and extensions
@@ -317,7 +317,7 @@ impl Context {
 
         let backend = self.backend.borrow();
         if self.check_current_context && !backend.is_current() {
-            unsafe { backend.make_current() };
+            // unsafe { backend.make_current() };
         }
 
         Ok(())
@@ -639,7 +639,7 @@ impl ContextExt for Context {
         if self.check_current_context {
             let backend = self.backend.borrow();
             if !backend.is_current() {
-                unsafe { backend.make_current() };
+                // unsafe { backend.make_current() };
                 debug_assert!(backend.is_current());
             }
         }
@@ -691,7 +691,7 @@ impl Drop for Context {
             if self.check_current_context {
                 let backend = self.backend.borrow();
                 if !backend.is_current() {
-                    backend.make_current();
+                    // backend.make_current();
                 }
             }
 
