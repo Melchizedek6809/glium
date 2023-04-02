@@ -39,7 +39,7 @@ features = []
 optional = true
 
 [dependencies.glutin-winit]
-version = "0.2"
+version = "0.3"
 features = []
 optional = true
 
@@ -49,12 +49,12 @@ features = []
 optional = true
 
 [dependencies.winit]
-version = "0.27"
+version = "0.28"
 features = []
 optional = true
 
 [dependencies]
-memoffset = "0.6"
+memoffset = "0.8"
 takeable-option = "0.5"
 backtrace = "0.3.2"
 lazy_static = "1.0"
