@@ -36,6 +36,12 @@ impl Error for GetFormatError {}
 // TODO: change bits to be u16 for consistency with the rest of the library
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum InternalFormat {
+    /// the format is stencil only
+    StencilOnly {
+        /// Number of bits of the first component.
+        bits1: usize,
+    },
+
     /// The format has one component.
     OneComponent {
         /// Type of the first component of the format.
@@ -98,6 +104,7 @@ impl InternalFormat {
     #[inline]
     pub fn get_total_bits(&self) -> usize {
         match *self {
+            InternalFormat::StencilOnly { bits1 } => bits1,
             InternalFormat::OneComponent { bits1, .. } => bits1,
             InternalFormat::TwoComponents { bits1, bits2, .. } => bits1 + bits2,
             InternalFormat::ThreeComponents { bits1, bits2, bits3, .. } => bits1 + bits2 + bits3,
@@ -146,7 +153,7 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
 {
     if ctxt.version >= &Version(Api::Gl, 3, 0) || ctxt.version >= &Version(Api::GlEs, 3, 0) {
         let (red_sz, red_ty, green_sz, green_ty, blue_sz, blue_ty,
-             alpha_sz, alpha_ty, depth_sz, depth_ty) = unsafe
+             alpha_sz, alpha_ty, depth_sz, depth_ty, stencil_sz) = unsafe
         {
             let mut red_sz = 0;
             let mut red_ty = 0;
@@ -158,6 +165,7 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
             let mut alpha_ty = 0;
             let mut depth_sz = 0;
             let mut depth_ty = 0;
+            let mut stencil_sz = 0;
 
             if ctxt.version >= &Version(Api::Gl, 4, 5) ||
                ctxt.extensions.gl_arb_direct_state_access
@@ -173,6 +181,7 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
                 ctxt.gl.GetTextureLevelParameteriv(id, 0, gl::TEXTURE_ALPHA_TYPE, &mut alpha_ty);
                 ctxt.gl.GetTextureLevelParameteriv(id, 0, gl::TEXTURE_DEPTH_SIZE, &mut depth_sz);
                 ctxt.gl.GetTextureLevelParameteriv(id, 0, gl::TEXTURE_DEPTH_TYPE, &mut depth_ty);
+                ctxt.gl.GetTextureLevelParameteriv(id, 0, gl::TEXTURE_STENCIL_SIZE, &mut stencil_sz);
 
             } else if ctxt.extensions.gl_ext_direct_state_access {
                 let id = texture.get_id();
@@ -198,6 +207,8 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
                                                       &mut depth_sz);
                 ctxt.gl.GetTextureLevelParameterivEXT(id, bind_point, 0, gl::TEXTURE_DEPTH_TYPE,
                                                       &mut depth_ty);
+                ctxt.gl.GetTextureLevelParameterivEXT(id, bind_point, 0, gl::TEXTURE_STENCIL_SIZE,
+                                                      &mut stencil_sz);
 
             } else {
                 let bind_point = texture.bind_to_current(ctxt);
@@ -217,33 +228,39 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
                                                &mut depth_sz);
                 ctxt.gl.GetTexLevelParameteriv(bind_point, 0, gl::TEXTURE_DEPTH_TYPE,
                                                &mut depth_ty);
+                ctxt.gl.GetTexLevelParameteriv(bind_point, 0, gl::TEXTURE_STENCIL_SIZE,
+                                               &mut stencil_sz);
             }
 
             (red_sz as gl::types::GLenum, red_ty as gl::types::GLenum,
              green_sz as gl::types::GLenum, green_ty as gl::types::GLenum,
              blue_sz as gl::types::GLenum, blue_ty as gl::types::GLenum,
              alpha_sz as gl::types::GLenum, alpha_ty as gl::types::GLenum,
-             depth_sz as gl::types::GLenum, depth_ty as gl::types::GLenum)
+             depth_sz as gl::types::GLenum, depth_ty as gl::types::GLenum,
+             stencil_sz as gl::types::GLenum)
         };
 
         Ok(match (red_sz, red_ty, green_sz, green_ty, blue_sz, blue_ty,
-               alpha_sz, alpha_ty, depth_sz, depth_ty)
+               alpha_sz, alpha_ty, depth_sz, depth_ty, stencil_sz)
         {
-            (_, gl::NONE, _, _, _, _, _, _, sz1, ty1) => InternalFormat::OneComponent {
+            (_, gl::NONE, _, _, _, _, _, _, _, gl::NONE, sz1) => InternalFormat::StencilOnly {
+                bits1: sz1 as usize,
+            },
+            (_, gl::NONE, _, _, _, _, _, _, sz1, ty1, _) => InternalFormat::OneComponent {
                 ty1: InternalFormatType::from_glenum(ty1),
                 bits1: sz1 as usize,
             },
-            (sz1, ty1, _, gl::NONE, _, _, _, _, _, _) => InternalFormat::OneComponent {
+            (sz1, ty1, _, gl::NONE, _, _, _, _, _, _, _) => InternalFormat::OneComponent {
                 ty1: InternalFormatType::from_glenum(ty1),
                 bits1: sz1 as usize,
             },
-            (sz1, ty1, sz2, ty2, _, gl::NONE, _, _, _, _) => InternalFormat::TwoComponents {
+            (sz1, ty1, sz2, ty2, _, gl::NONE, _, _, _, _, _) => InternalFormat::TwoComponents {
                 ty1: InternalFormatType::from_glenum(ty1),
                 bits1: sz1 as usize,
                 ty2: InternalFormatType::from_glenum(ty2),
                 bits2: sz2 as usize,
             },
-            (sz1, ty1, sz2, ty2, sz3, ty3, _, gl::NONE, _, _) => InternalFormat::ThreeComponents {
+            (sz1, ty1, sz2, ty2, sz3, ty3, _, gl::NONE, _, _, _) => InternalFormat::ThreeComponents {
                 ty1: InternalFormatType::from_glenum(ty1),
                 bits1: sz1 as usize,
                 ty2: InternalFormatType::from_glenum(ty2),
@@ -251,7 +268,7 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
                 ty3: InternalFormatType::from_glenum(ty3),
                 bits3: sz3 as usize,
             },
-            (sz1, ty1, sz2, ty2, sz3, ty3, sz4, ty4, _, gl::NONE) => InternalFormat::FourComponents {
+            (sz1, ty1, sz2, ty2, sz3, ty3, sz4, ty4, _, gl::NONE, _) => InternalFormat::FourComponents {
                 ty1: InternalFormatType::from_glenum(ty1),
                 bits1: sz1 as usize,
                 ty2: InternalFormatType::from_glenum(ty2),
