@@ -26,14 +26,14 @@ use winit::platform::windows::EventLoopBuilderExtWindows;
 
 use std::env;
 use std::thread;
-use std::sync::{mpsc::Receiver, Once, RwLock};
+use std::sync::{mpsc::Receiver, Mutex, Once, RwLock};
 
 /// Builds a display for tests.
 pub fn build_display() -> WindowedDisplay {
 
     // thread communication
     static mut EVENT_LOOP_PROXY: RwLock<Option<EventLoopProxy<()>>> = RwLock::new(None);
-    static mut CONFIG_RECEIVER: RwLock<Option<Receiver<(Window, Config)>>> = RwLock::new(None);
+    static mut CONFIG_RECEIVER: Mutex<Option<Receiver<(Window, Config)>>> = Mutex::new(None);
     // initialization
     static mut INIT_EVENT_LOOP: Once = Once::new();
     static mut SEND_PROXY: Once = Once::new();
@@ -90,7 +90,7 @@ pub fn build_display() -> WindowedDisplay {
             // all other threads `read` these statics
             *EVENT_LOOP_PROXY.write().unwrap() = Some(event_loop_proxy);
 
-            *CONFIG_RECEIVER.write().unwrap() = Some(receiver);
+            *CONFIG_RECEIVER.lock().unwrap() = Some(receiver);
         });
     }
 
@@ -101,10 +101,12 @@ pub fn build_display() -> WindowedDisplay {
     guard.as_ref().unwrap().send_event(()).unwrap();
 
     // receive config and create display
-    let guard = unsafe {
-        CONFIG_RECEIVER.read().unwrap()
+    let (window, gl_config) = {
+        let guard = unsafe {
+            CONFIG_RECEIVER.lock().unwrap()
+        };
+        guard.as_ref().unwrap().recv().unwrap()
     };
-    let (window, gl_config) = guard.as_ref().unwrap().recv().unwrap();
 
     // Then the configuration which decides which OpenGL version we'll end up using, here we just use the default which is currently 3.3 core
     // When this fails we'll try and create an ES context, this is mainly used on mobile devices or various ARM SBC's
