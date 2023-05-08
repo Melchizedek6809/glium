@@ -36,12 +36,6 @@ impl Error for GetFormatError {}
 // TODO: change bits to be u16 for consistency with the rest of the library
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum InternalFormat {
-    /// the format is stencil only
-    StencilOnly {
-        /// Number of bits of the first component.
-        bits1: usize,
-    },
-
     /// The format has one component.
     OneComponent {
         /// Type of the first component of the format.
@@ -104,7 +98,6 @@ impl InternalFormat {
     #[inline]
     pub fn get_total_bits(&self) -> usize {
         match *self {
-            InternalFormat::StencilOnly { bits1 } => bits1,
             InternalFormat::OneComponent { bits1, .. } => bits1,
             InternalFormat::TwoComponents { bits1, bits2, .. } => bits1 + bits2,
             InternalFormat::ThreeComponents { bits1, bits2, bits3, .. } => bits1 + bits2 + bits3,
@@ -243,7 +236,8 @@ pub fn get_format(ctxt: &mut CommandContext<'_>, texture: &TextureAny)
         Ok(match (red_sz, red_ty, green_sz, green_ty, blue_sz, blue_ty,
                alpha_sz, alpha_ty, depth_sz, depth_ty, stencil_sz)
         {
-            (_, gl::NONE, _, _, _, _, _, _, _, gl::NONE, sz1) => InternalFormat::StencilOnly {
+            (_, gl::NONE, _, _, _, _, _, _, _, gl::NONE, sz1) => InternalFormat::OneComponent {
+                ty1: InternalFormatType::UnsignedInt,
                 bits1: sz1 as usize,
             },
             (_, gl::NONE, _, _, _, _, _, _, sz1, ty1, _) => InternalFormat::OneComponent {
